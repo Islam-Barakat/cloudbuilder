@@ -1,0 +1,50 @@
+---
+- name: Deploy Cloud Builder OVA to ESXi Host
+  hosts: esxi
+  gather_facts: no
+  tasks:
+    - name: Deploy OVA to ESXi host
+      community.vmware.vmware_ovf_deploy:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_password }}"
+        validate_certs: no
+        ovf: "{{ ova_path }}"
+        datastore: "{{ esxi_datastore }}"
+        vm_name: "{{ vm_name }}"
+        networks:
+          - name: "{{ esxi_network }}"
+            device_type: "vmxnet3"
+        disk_provisioning: thin
+        wait_for_ip_address: yes
+      register: result
+
+    - name: Wait for Cloud Builder VM to get IP
+      wait_for:
+        host: "{{ result.instance.ip }}"
+        port: 443
+        delay: 10
+        timeout: 600
+      when: result.instance.ip is defined
+
+    - name: Output the Cloud Builder VM IP
+      debug:
+        msg: "Cloud Builder VM deployed at IP: {{ result.instance.ip }}"
+
+    - name: Configure Static IP, Gateway, DNS, and NTP on CloudBuilder VM (Linux Example)
+      lineinfile:
+        path: "/etc/network/interfaces"
+        regexp: "^iface {{ network_config.interface }}"
+        line: |
+          iface {{ network_config.interface }} inet static
+          address {{ static_ip }}
+          netmask {{ netmask }}
+          gateway {{ gateway }}
+          dns-nameservers {{ dns }}
+          up ntpdate {{ ntp }}
+
+    - name: Restart networking service on CloudBuilder VM to apply changes
+      service:
+        name: networking
+        state: restarted
+
